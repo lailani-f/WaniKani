@@ -16,8 +16,8 @@
         var eventNameSpace = indexOfDot > 0 ? eventType.substring(indexOfDot) : "";
 
         eventType = indexOfDot > 0 ? eventType.substring(0, indexOfDot) : eventType;
-        handler = handler == undefined ? eventData : handler;
-        eventData = typeof eventData == "function" ? {} : eventData;
+        handler = handler === undefined ? eventData : handler;
+        eventData = typeof eventData === "function" ? {} : eventData;
 
         return this.each(function() {
             var $this = $(this);
@@ -47,9 +47,10 @@
 
     const evaluate = (type, input) => {
         // ... and revert side effects
-        const formValue = $("#user-response").val();
+        const $response = $("#user-response");
+        const formValue = $response.val();
         const result = answerChecker.evaluate(type, input);
-        $("#user-response").val(formValue);
+      $response.val(formValue);
         return result;
     };
 
@@ -57,7 +58,6 @@
         const $response = $("#user-response");
         if ( $response.is(":disabled") ) return;
 
-        const $button = $("#answer-form button");
         const $form = $("#answer-form form");
         const questionType = $.jStorage.get("questionType");
         const answer = $response.val();
