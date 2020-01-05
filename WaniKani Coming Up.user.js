@@ -3,32 +3,38 @@
 // @namespace    wk_lai
 // @version      1.0
 // @description  Shows upcoming progression reviews concisely
-// @require      http://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js
 // @author       lai
 // @match        *://www.wanikani.com/*
-// @grant        GM_addStyle
+// @grant        none
+// @run-at       document-idle
 // ==/UserScript==
 
-(($) => {
-  // Defined by WaniKani
+function RunInPage(func) {
+  var s = document.createElement("script");
+  s.textContent = "(" + func + ")();";
+  document.body.appendChild(s);
+  setTimeout(function(){document.body.removeChild(s)}, 0);
+}
+
+function bootstrap() {
+
+// Defined by WaniKani
   const unlockedAtKey = "unlockedAt";
   const availableAtKey = "availableAt";
   const passedAtKey = "passedAt";
   const srsStageKey = "srsStage";
 
-  // Defined locally
+// Defined locally
   const valuesKey = "values";
-  const latestKey = "latest";
   const availableAtMsKey = "availableAtMs";
-  const availableInHoursKey = "availableInHours";
   const amountKey = "amount";
   const srsScoreKey = "srsScore";
-  const timescaleHoursKey = "timescaleHours";
   const tagsKey = "tags";
   const passedKey = "passed";
   const allPassedKey = "allPassed";
 
-  const srsScores = [0, 14400000, 43200000, 126000000, 295200000, 896400000, 2102400000, 4690800000, 15055200000];
+  const srsScoresByStage = [0, 14400000, 43200000, 126000000, 295200000, 896400000, 2102400000, 4690800000, 15055200000];
+  const timescaleSetHours = [6, 12, 24, 48, 72, 96, 168, 336];
 
   const groupBy = function (xs, key) {
     const getOrSetEmpty = (map, key) => {
@@ -45,230 +51,414 @@
     }, new Map());
   };
 
-  // won't work with sparse arrays
   const first = (arr) => arr[0];
-  const last = (arr) => arr.slice(-1).pop();
-
+  const remove = (arr, obj) => {
+    for (let i = 0; i < arr; i++) {
+      if (arr[i] === obj) {
+        arr.splice(i, 1);
+        return true;
+      }
+    }
+    return false;
+  };
   const orderBy = (arr, predicate) => arr.slice().sort(predicate);
 
-  GM_addStyle(
-    '.cu-value { font-size: 20px; height: 1.5em; width: 1.5em; line-height: 1.5em; }' +
-    '.cu-group-root { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, auto)); grid-gap: 15px 20px; }' +
-    '.cu-grid { display: grid; grid-column-gap: 4px; grid-template-columns: repeat(auto-fill, 30px); height: 30px; justify-content: space-between; overflow: hidden; position: relative; }' +
-    '.cu-root { font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif; }' +
-    '.cu-root:hover .cu-btn-settings { opacity: 1; }' +
-    '.cu-btn-settings { opacity:0; transition: opacity .3s ease-out; display: inline-block; padding: 4px 12px; font-size: 16px; line-height: 20px; cursor: pointer; }' +
-    '.cu-btn-settings:hover { color: #333; }' +
-    '.cu-settings { display: grid; grid-template-columns: repeat(2, 80px auto); grid-gap: 15px 20px; align-items: center; margin-bottom: 10px; }' +
-    '.cu-settings-root .control-group { display: flex; align-items: center; }' +
-    '.cu-select { margin-bottom: 0; width: 80px; }' +
-    '.cu-label { margin-bottom: 0; }' +
-    '.cu-aside { font-family: "Ubuntu", Helvetica, Arial, sans-serif; }' +
-    '.cu-group-head { position: relative; display: flex; padding-top: 2px;background: linear-gradient(180deg,  #999 calc(0px), #fff calc(1px), transparent calc(100%)); margin-bottom: 5px; }' +
-    '.cu-group-number { padding: 2px; width: 18px; text-align: center; }' +
-    '.cu-group-number.cu-all-passed { background-color: #08C66C; }' +
-    '.cu-group-number.cu-not-all-passed { background-color: #7000a9; }' +
-    '.cu-group-head .cu-group-number { border-radius: 0; }' +
-    '.cu-group-time { font-size: 11.844px; color: rgba(0,0,0,0.6); padding: 2px 3px 0; line-height: 14px; }' +
-    '.cu-timeline-root { height: 16px; margin-bottom: 13px; }' +
-    '.cu-timeline-root:empty { display: none; }' +
-    '.cu-time-axis { position: absolute; left: 0; right: 0; top: 0; height: 3px; border-top: 1px solid white; border-bottom: 1px solid white; }' +
-    '.cu-indicator { position: absolute; transition: left .5s ease-out; }' +
-    '[cu-inactive="true"] { opacity: .3; }' +
-    '[cu-style="circle"] { margin-left: 8px; margin-right: 8px; }' +
-    '[cu-style="circle"] .cu-time-axis { margin-left: -8px; margin-right: -8px; }' +
-    '[cu-style="circle"] .cu-indicator { top: 2px; width: 16px; padding: 1px 0; font-size: 11.844px; line-height: 14px; border-radius: 8px; color: #fff; text-align: center; }' +
-    '[cu-style="circle"] .cu-indicator.cu-all-passed { background-color: #08C66C; }' +
-    '[cu-style="circle"] .cu-indicator.cu-not-all-passed { background-color: #7000a9; }' +
-    '[cu-style="circle"] .cu-scale-end { width: 8px; }' +
-    '[cu-style="cone"] { margin-left: 5px; margin-right: 5px; }' +
-    '[cu-style="cone"] .cu-time-axis { margin-left: -5px; margin-right: -5px; }' +
-    '[cu-style="cone"] .cu-indicator { top: 3px; padding: 0; width: 0px;  height: 0px; color: transparent; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid; }' +
-    '[cu-style="cone"] .cu-indicator.cu-all-passed { border-bottom-color: #08C66C; }' +
-    '[cu-style="cone"] .cu-indicator.cu-not-all-passed { border-bottom-color: #7000a9; }' +
-    '[cu-style="cone"] .cu-scale-end { width: 5px; }' +
-    '.cu-tag { background-color: #fff; color: rgba(0,0,0,0.6); line-height: 14px; padding: 2px 4px; font-size: 11.844px; }' +
-    '.cu-spacer { flex-grow: 1; }' +
-    '.cu-scale { position: absolute; top: 2px; height: 6px; border-left: 1px solid #d8d8d8; border-right: 1px solid white; }' +
-    '.cu-scale-end { position: absolute; left: 100%; top: 2px; height: 6px; width: 8px; background: linear-gradient(135deg, #d8d8d8 50%, transparent calc(50% + 1px)); }' +
-    '.cu-scale-head { position: absolute; right: 0; bottom: 100%; font-size: 11.844px; line-height: 1em; color: #777; font-weight: 300; text-shadow: 0 1px 0 #fff;}' +
-    '.cu-overflow-icon { position: absolute; top:0; left: 0; padding: 0; font-size: 14px; height: 100%; width: 100%; line-height: 2em; background: linear-gradient(-45deg, #5571e2, #294ddb); }'
-  );
-
-  class CuDataProvider {
-    constructor(selector) {
-      this.selector = selector;
-      this.data;
+  const getTime = (dateTime) => new Date(dateTime).getTime();
+  const hoursToMs = (h) => h * 1000 * 60 * 60;
+  const getFriendlyTime = (ms) => {
+    const minutes = Math.ceil(ms / 1000 / 60);
+    if (minutes <= 0) {
+      return { value: 'now' };
     }
-    getData() {
-      if ( !this.data ) {
-        this.data = $(this.selector).children("div").data("react-props").data;
+    if (minutes <= 60) {
+      return { unit: 'minutes', value: minutes };
+    }
+    const hours = Math.ceil(minutes / 60);
+    if (hours <= 48) {
+      return { unit: 'hours', value: hours };
+    }
+    const days = Math.ceil(hours / 24);
+    return { unit: 'days', value: days };
+  };
+
+  class PubSub {
+    constructor() {
+      this.events = {};
+    }
+
+    subscribe(event, callback) {
+      let self = this;
+
+      if (!self.events.hasOwnProperty(event)) {
+        self.events[event] = [];
       }
-      return this.data;
+
+      return self.events[event].push(callback);
+    }
+
+    unsubscribe(event, callback) {
+      let self = this;
+
+      if (!self.events.hasOwnProperty(event)) {
+        return false;
+      }
+
+      return remove(self.events[event], callback);
+
+    }
+
+    publish(event, data = {}) {
+      let self = this;
+
+      if (!self.events.hasOwnProperty(event)) {
+        return [];
+      }
+
+      return self.events[event].map(callback => callback(data));
     }
   }
 
-  class CuDataService {
-    constructor(timeService, dataProvider, settings) {
-      this.timeService = timeService;
-      this.dataProvider = dataProvider;
-      this.settings = settings;
-    }
-    getDomainModel() {
-      const rawData = this.dataProvider.getData();
-      const unlockedItems = rawData.filter(v => v[unlockedAtKey]);
-      const notYetPassedItems = this.filterPassedItems(unlockedItems);
-      const groupedData = Array.from(groupBy(notYetPassedItems, availableAtKey));
-      const filteredData = groupedData.filter(x => x[0] != null).filter(x => x[1].length);
-      const enhancedGroups = filteredData.map(d => this.createEnhancedGroup(d));
-      return this.createEnhancedTotal(enhancedGroups);
-    }
-    filterPassedItems(items) {
-      if (this.settings.getShowPassed()) {
-        return items;
-      }
-      return items.filter(i => !i[passedAtKey]);
-    }
+  class Store {
+    constructor(params) {
+      let self = this;
+      self.actions = params.actions || {};
+      self.mutations = params.mutations || {};
+      self.state = {};
+      self.status = 'resting';
 
-    findLowestSrsStage(values) {
-      const lowOrdered = orderBy(values, (a, b) => a[srsStageKey] - b[srsStageKey]);
-      const lowestValue = first(lowOrdered);
-      return lowestValue[srsStageKey];
-    }
+      self.events = new PubSub();
 
-    sortByLowestLevel(groups) {
-      return orderBy(groups, (a, b) => a[srsScoreKey] - b[srsScoreKey]);
-    }
+      const handler = {
+        get(target, key) {
+          if (typeof target[key] === 'object' && target[key] !== null) {
+            return new Proxy(target[key], handler)
+          } else {
+            return target[key];
+          }
+        },
+        set: function (state, key, value) {
+          state[key] = value;
 
-    sortByLargestAmount(groups) {
-      return orderBy(groups, (a, b) => b[amountKey] - a[amountKey]);
-    }
+          console.log(`stateChange: ${key}: ${value}`);
 
-    sortByFirstAvailable(groups) {
-      return orderBy(groups, (a, b) => a[availableAtMsKey] - b[availableAtMsKey]);
-    }
+          self.events.publish('stateChange', self.state);
 
-    calculateSrsScore(availableAt, values) {
-      const lowestSrsStage = this.findLowestSrsStage(values);
-      return availableAt + srsScores[lowestSrsStage]
-    }
-    createEnhancedGroup(x) {
-      const values = x[1];
-      const allPassed = values.every( x => x[passedKey] );
-      const availableAt = this.timeService.getTime(x[0]);
-      const availableIn = this.timeService.calcAvailableIn(availableAt);
-      const srsScore = this.calculateSrsScore(availableAt, values);
+          if (self.status !== 'mutation') {
+            console.warn(`${key} was not set via mutation.`);
+          }
 
-      return {
-        [valuesKey]: values,
-        [availableInHoursKey]: this.timeService.msToHours(availableIn),
-        [availableAtMsKey]: availableAt,
-        [amountKey]: values.length,
-        [srsScoreKey]: srsScore,
-        [allPassedKey]: allPassed,
-        [tagsKey]: []
+          self.status = 'resting';
+
+          return true;
+        }
       };
+      self.state = new Proxy((params.state || {}), handler);
+    }
+
+    dispatch(actionKey, payload) {
+
+      let self = this;
+
+      if (typeof self.actions[actionKey] !== 'function') {
+        console.warn(`Action "${actionKey}" doesn't exist.`);
+        return false;
+      }
+
+      console.groupCollapsed(`ACTION: ${actionKey}`);
+
+      self.status = 'action';
+
+      self.actions[actionKey](self, payload);
+
+      console.groupEnd();
+
+      return true;
+    }
+
+    commit(mutationKey, payload) {
+      let self = this;
+
+      if (typeof self.mutations[mutationKey] !== 'function') {
+        console.warn(`Mutation "${mutationKey}" doesn't exist`);
+        return false;
+      }
+
+      self.status = 'mutation';
+
+      let newState = self.mutations[mutationKey](self.state, payload);
+
+      self.state = Object.assign(self.state, newState);
+
+      return true;
+    }
+  }
+
+  class Component extends HTMLElement {
+    constructor(props = {}) {
+      super();
+      const self = this;
+
+      self.$element = $(self);
+
+      if (props.store instanceof Store) {
+        props.store.events.subscribe('stateChange', () => self._render());
+      }
+    }
+
+    connectedCallback() {
+      this._render();
+      this.componentDidMount();
+    }
+
+    disconnectedCallback() {
+      this.componentDidDismount();
+    }
+
+    render() {
     };
 
-    createEnhancedTotal(groups) {
-      const lowestGroup = first(this.sortByLowestLevel(groups));
-      const largestGroup = first(this.sortByLargestAmount(groups));
-      const groupsSortedByEarliest = this.sortByFirstAvailable(groups);
-      const earliestGroup = first(groupsSortedByEarliest);
-      const latestGroup = last(groupsSortedByEarliest);
+    componentDidMount() {
+    };
 
-      // const groupLayout = [earliestGroup, lowestGroup, largestGroup, ...groupsSortedByEarliest];
-      // const distinctGroups = [... new Set(groupLayout)];
+    componentDidDismount() {
+    };
 
-      return {
-        [latestKey]: latestGroup,
-        [availableAtMsKey]: earliestGroup,
-        [amountKey]: largestGroup,
-        [srsScoreKey]: lowestGroup,
-        [valuesKey]: groupsSortedByEarliest
-      };
+    _render() {
+      $(this).html(this.render());
     }
   }
 
-  class CuDomDynamicScaffoldingService {
-    constructor(dataService, settings){
-      this.dataService = dataService;
-      this.settings = settings;
+  const cuSettings = {
+    load() {
+      const storedSettings = JSON.parse(localStorage.getItem("cu-settings"));
+      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: "never", indicatorStyle: "cone"};
+      return Object.assign(defaultSettings, storedSettings);
+    },
+    save(settings) {
+      const settingsJson = JSON.stringify(settings);
+      localStorage.setItem("cu-settings", settingsJson);
+    }
+  };
 
-      this.timelineScalings = [6, 12, 24, 48, 72, 96, 192];
+  const actions = {
+    setMaxGroups(context, payload) {
+      context.commit("setMaxGroups", payload);
+      context.dispatch("storeSettings");
+      context.dispatch("refreshDomainModel");
+      context.dispatch("updateUi");
+    },
+    setShowTimeline(context, payload) {
+      context.commit("setShowTimeline", payload);
+      context.dispatch("storeSettings");
+      context.dispatch("updateUi");
+    },
+    setShowPassedItems(context, payload) {
+      context.commit("setShowPassedItems", payload);
+      context.dispatch("storeSettings");
+      context.dispatch("refreshDomainModel");
+      context.dispatch("updateUi");
+    },
+    setIndicatorStyle(context, payload) {
+      context.commit("setIndicatorStyle", payload);
+      context.dispatch("storeSettings");
+      context.dispatch("refreshDomainModel");
+      context.dispatch("updateUi");
+    },
+    storeSettings(context) {
+      cuSettings.save(context.state.settings);
+    },
+    refreshTimestamp(context) {
+      const now = new Date().getTime();
+      context.commit("setTimestamp", now);
+    },
+    updateUi(context) {
+      context.dispatch("refreshTimestamp");
+      context.dispatch("refreshTimescale");
+      context.events.publish("refresh-ui");
+    },
+    refreshTimescale(context) {
+      // smallest fitting scale
+      const relevantGroups = context.state.domainModel.slice(0, context.state.settings.maxGroups);
+      const availableIn = relevantGroups.map(v => v[availableAtMsKey] - context.state.timestamp);
+      const timescale = availableIn.reduce((prev, cur) => context.state.timescaleSet.find(x => x > cur) || prev, 0);
+      context.commit("setTimescale", timescale);
+    },
+    refreshDomainModel(context) {
+      const unlockedItems = context.state.levelData.filter(v => v[unlockedAtKey]);
+      const notYetPassedItems = filterPassedItems(unlockedItems);
+      const groupedData = Array.from(groupBy(notYetPassedItems, availableAtKey));
+      const filteredData = groupedData.filter(x => x[0] != null).filter(x => x[1].length);
+      const domainModel = filteredData.map(d => createDomainModel(d));
+      const sorted = tagGroupsAndSort(domainModel);
+      context.commit("setDomainModel", sorted);
+
+      function filterPassedItems(items) {
+        if (context.state.settings.showPassedItems) {
+          return items;
+        }
+        return items.filter(i => !i[passedAtKey]);
+      }
+
+      function findLowestSrsScore(availableAt, values) {
+        const srsScores = values.map(v => srsScoresByStage[v[srsStageKey]] - availableAt);
+        const lowOrdered = orderBy(srsScores, (a, b) => a - b);
+        return first(lowOrdered);
+      }
+
+      function sortByLowestLevel(groups) {
+        return orderBy(groups, (a, b) => a[srsScoreKey] - b[srsScoreKey]);
+      }
+
+      function sortByLargestAmount(groups) {
+        return orderBy(groups, (a, b) => b[amountKey] - a[amountKey]);
+      }
+
+      function sortByFirstAvailable(groups) {
+        return orderBy(groups, (a, b) => a[availableAtMsKey] - b[availableAtMsKey]);
+      }
+
+      function createDomainModel(x) {
+        const values = x[1];
+        const allPassed = values.every(x => x[passedKey]);
+        const availableAt = getTime(x[0]);
+        const srsScore = findLowestSrsScore(availableAt, values);
+
+        return {
+          [valuesKey]: values,
+          [availableAtMsKey]: availableAt,
+          [amountKey]: values.length,
+          [srsScoreKey]: srsScore,
+          [allPassedKey]: allPassed,
+          [tagsKey]: []
+        };
+      }
+
+      function tagGroupsAndSort(groups) {
+        const lowestGroup = first(sortByLowestLevel(groups));
+        const largestGroup = first(sortByLargestAmount(groups));
+        const groupsSortedByEarliest = sortByFirstAvailable(groups);
+        const earliestGroup = first(groupsSortedByEarliest);
+
+        earliestGroup.isEarliest = true;
+        largestGroup.isLargest = true;
+        lowestGroup.isLowest = true;
+
+        return groupsSortedByEarliest;
+      }
+    }
+  };
+
+  const mutations = {
+    setMaxGroups(state, payload) {
+      state.settings.maxGroups = payload;
+    },
+    setShowTimeline(state, payload) {
+      state.settings.showTimeline = payload;
+    },
+    setShowPassedItems(state, payload) {
+      state.settings.showPassedItems = payload;
+    },
+    setIndicatorStyle(state, payload) {
+      state.settings.indicatorStyle = payload;
+    },
+    setDomainModel(state, payload) {
+      state.domainModel = payload;
+    },
+    setTimestamp(state, payload) {
+      state.timestamp = payload;
+    },
+    setTimescale(state, payload) {
+      state.timescale = payload;
+    },
+  };
+
+  const levelData = $("[data-react-class='Progress/Progress']").data("react-props").data;
+  const store = new Store({
+    actions,
+    mutations,
+    state: {
+      levelData,
+      settings: cuSettings.load(),
+      timescaleSet: timescaleSetHours.map(hoursToMs)
+    }
+  });
+  store.dispatch("refreshDomainModel");
+
+
+  class GroupGridComponent extends Component {
+    constructor() {
+      super({
+        store
+      });
+
+      this.refresh = this.refresh.bind(this);
+      this.resizeUpdate = this.resizeUpdate.bind(this);
     }
 
-    init($root) {
-      const domainModel = this.dataService.getDomainModel();
-      this.initGroups( domainModel, $root );
-      this.initTimeline( domainModel, $root );
+    componentDidMount() {
+      store.events.subscribe("refresh-ui", this.refresh);
+      store.events.subscribe("resizeUpdate", this.resizeUpdate);
+      this.refresh();
     }
 
-    uninit($root) {
-      $root.find(".cu-group-root").children().remove();
-      $root.find(".cu-timeline-root").children().remove();
+    componentDidDismount() {
+      store.events.unsubscribe("refresh-ui", this.refresh);
+      store.events.unsubscribe("resizeUpdate", this.resizeUpdate);
     }
 
-    update($root) {
-      this.uninit($root);
-      this.init($root);
+    refresh() {
+      this.updateGroupTimes();
+      this.resizeUpdate(); // updating group times might have resized the grid ...
     }
 
-    initGroups(domainModel, $root) {
-      const groups = this.createGroups(domainModel);
-      $root.find(".cu-group-root")
-        .append(groups);
+    render() {
+      return store.state.domainModel
+        .slice(0, store.state.settings.maxGroups)
+        .map((g, i) => this.renderGroup(g, i));
     }
 
-    createGroups(domainModel) {
-      const maxGroups = this.settings.getMaxGroups();
-      return domainModel[valuesKey]
-        .slice(0, maxGroups)
-        .map((g, i) => this.createGroup(domainModel, g, i));
-    }
+    renderGroup(group, index) {
+      const $head = this.renderGroupHead(group, index);
+      const $body = this.renderBody(group);
 
-    createGroup(domainModel, group, index) {
-      const $head = this.createGroupHead(domainModel, group, index);
-      const $body = this.createBody(group);
-
-      return $("<div class='cu-group' />")
+      return $("<div class='group' />")
         .append($head)
         .append($body);
     };
 
-    createBody(group) {
-      const gridValues = group[valuesKey].map(v => this.createGridValue(v));
+    renderBody(group) {
+      const gridValues = group[valuesKey].map(v => this.renderGridValue(v));
 
-      return $("<div class='cu-grid' />")
+      return $("<div class='grid' />")
         .append(gridValues);
     };
 
-    createTag(name, title) {
-      return $("<div class='cu-tag' />")
+    renderTag(name, title) {
+      return $("<div class='tag' />")
         .text(name)
         .attr("title", title);
     }
 
-    createTags(domainModel, group) {
+    renderTags(group) {
       const tags = [];
-      if (group === domainModel[availableAtMsKey] ) {
-        tags.push(this.createTag("earliest", "This group will be the earliest available for review."));
+      if (group.isEarliest) {
+        tags.push(this.renderTag("earliest", "This group will be the earliest available for review."));
       }
-      if (group === domainModel[amountKey]) {
-        tags.push(this.createTag("largest", "This group contains the largest amount of review material."));
+      if (group.isLargest) {
+        tags.push(this.renderTag("largest", "This group contains the largest amount of review material."));
       }
-      if (group === domainModel[srsScoreKey]) {
-        tags.push(this.createTag("critical", "In this group are one or more items of the lowest SRS stage."));
+      if (group.isLowest) {
+        tags.push(this.renderTag("critical", "In this group are one or more items of the lowest SRS stage."));
       }
       return tags;
     };
 
-    createTimeToGo(group) {
-      return $("<div class='cu-group-time' />")
+    renderTimeToGo(group) {
+      return $("<div class='group-time' />")
         .data(availableAtMsKey, group[availableAtMsKey])
     };
 
-    createGridItemContent(value) {
+    renderGridItemContent(value) {
       if (value.characterImage) {
         return $("<img  src=''/>")
           .attr("src", value.characterImage);
@@ -277,28 +467,28 @@
       }
     }
 
-    createGridValue(value) {
+    renderGridValue(value) {
       const className = this.getClassName(value.type);
-      const $itemContent = this.createGridItemContent(value);
+      const $itemContent = this.renderGridItemContent(value);
 
-      return $("<div class='cu-value' />")
+      return $("<div class='value' />")
         .addClass(className)
         .append($itemContent);
     };
 
-    createGroupNumber(group, index) {
-      const passedClass = this.getPassedClass(group);
-      return $("<div class='cu-group-number badge' />")
-        .addClass(passedClass)
+    renderGroupNumber(group, index) {
+      return $("<div class='group-number badge' />")
+        .attr("all-passed", group[allPassedKey])
         .text(index + 1);
     }
-    createGroupHead(domainModel, group, index) {
-      const tags = this.createTags(domainModel, group);
-      const $number = this.createGroupNumber(group, index);
-      const $spacer = $("<div class='cu-spacer' />");
-      const $timeToGo = this.createTimeToGo(group);
 
-      return $("<div class='cu-group-head' />")
+    renderGroupHead(group, index) {
+      const tags = this.renderTags(group);
+      const $number = this.renderGroupNumber(group, index);
+      const $spacer = $("<div class='spacer' />");
+      const $timeToGo = this.renderTimeToGo(group);
+
+      return $("<div class='group-head' />")
         .append($number)
         .append(tags)
         .append($spacer)
@@ -314,235 +504,110 @@
       }
     };
 
-    initTimeline(domainModel, $root) {
-      if (!this.settings.getShowTimeline()) return;
-      const timescaleHours = this.calculateScale(domainModel);
-      const indicatorStyle = this.settings.getIndicatorStyle();
+    createTimeLiteral(ms) {
+      const time = getFriendlyTime(ms);
+      switch (time.unit) {
+        case 'minutes':
+          const suffix = time.value === 1 ? 'minute' : 'minutes';
+          return `in ${time.value} ${suffix}`;
+        case 'hours':
+          return `in ${time.value} hours`;
+        case 'days':
+          return `in ${time.value} days`;
+        default:
+          return time.value;
+      }
+    }
 
-      const $timeAxis = $("<div class='cu-time-axis boxshadow-inset bg-mid-gray' />");
-      const $scaleEnd = $("<div class='cu-scale-end' />");
-      const $head = $("<div class='cu-scale-head' />")
-        .text(`${timescaleHours} hours`);
+    updateGroupTimes() {
+      this.$element.find(".group-time").each((i, e) => {
+        const $groupTime = $(e);
+        const availableAt = $groupTime.data(availableAtMsKey);
+        const availableIn = (availableAt - store.state.timestamp);
+        const text = this.createTimeLiteral(availableIn);
+        $groupTime.text(text);
+      });
+    }
 
-      const indicators = domainModel[valuesKey].map((g, i) => this.createIndicator(g, i));
-      const scales = Array(timescaleHours).fill().map((_, i) => this.createScale(timescaleHours, i));
+    resizeUpdate() {
+      this.$element.find(".overflow-icon").remove();
+      this.$element.find(".group").each((i, e) => {
+        const $group = $(e);
+        const $grid = $group.find(".grid");
+        const $values = $group.find(".value");
+        const bounds = {x: $grid.width(), y: $grid.height()};
 
-      $root.find(".cu-timeline-root")
+        const $visibles = $values.filter((i, v) => {
+          return v.offsetLeft < bounds.x && v.offsetTop < bounds.y;
+        });
+        if ($visibles.length === $values.length) return;
+
+        const lastVisible = $visibles.last();
+        const numInvisible = $values.length - $visibles.length + 1; // +1 because the last visible element now gets obscured.
+
+        const $overflowIndicator = $("<div class='overflow-icon' />")
+          .text(`+${numInvisible}`);
+
+        $(lastVisible).append($overflowIndicator);
+      });
+    };
+  }
+
+  class TimelineComponent extends Component {
+    constructor() {
+      super({
+        store
+      });
+      this.refresh = this.refresh.bind(this);
+    }
+
+    componentDidMount() {
+      store.events.subscribe("refresh-ui", this.refresh);
+      this.refresh();
+    }
+
+    componentDidDismount() {
+      store.events.unsubscribe("refresh-ui", this.refresh);
+    }
+
+    refresh() {
+      this.updateTimelineIndicator();
+    }
+
+    render() {
+      if (!store.state.settings.showTimeline) return null;
+      if (!store.state.timescale) return null;
+
+      const time = getFriendlyTime(store.state.timescale);
+      const $timeAxis = $("<div class='time-axis boxshadow-inset bg-mid-gray' />");
+      const $scaleEnd = $("<div class='scale-end' />");
+      const $head = $("<div class='scale-head' />")
+        .text(`${time.value} ${time.unit}`);
+
+      const indicators = store.state.domainModel.map((g, i) => this.renderIndicator(g, i));
+      const scales = Array(time.value).fill().map((_, i) => this.renderScale(i, time.value));
+
+      return $("<div class='timeline' />")
         .append($head)
         .append($timeAxis)
         .append(scales)
         .append($scaleEnd)
         .append(indicators)
-        .attr("cu-style", indicatorStyle)
-        .data(timescaleHoursKey, timescaleHours);
+        .attr("cu-style", store.state.settings.indicatorStyle);
     };
 
-    getPassedClass(group) {
-      return group[allPassedKey] ? "cu-all-passed": "cu-not-all-passed";
-    }
-
-    createIndicator(group, index) {
-      const passedClass = this.getPassedClass(group);
-      const maxGroups = this.settings.getMaxGroups();
-      const isInactive = index >= maxGroups;
-      return $("<div class='cu-indicator' />")
-        .addClass(passedClass)
-        .attr("cu-inactive", isInactive)
+    renderIndicator(group, index) {
+      const isInactive = index >= store.state.settings.maxGroups;
+      return $("<div class='indicator' />")
+        .attr("all-passed", group[allPassedKey])
+        .attr("inactive", isInactive)
         .text(index + 1)
         .data(availableAtMsKey, group[availableAtMsKey]);
     };
 
-    createScale(total, index) {
+    renderScale(index, total) {
       const left = index / total * 100;
-      return $("<div class='cu-scale' />").css({'left': `calc(${left}% - 1px)`}); // -1 to center
-    }
-
-    calculateScale(domainModel) {
-      // smallest fitting scale
-      const availableInHours = domainModel[valuesKey].map(v => v[availableInHoursKey]);
-      return availableInHours.reduce((prev, cur) => this.timelineScalings.find(x => x > cur) || prev, 0);
-    }
-  }
-
-  class CuDomScaffoldingService {
-    constructor(settings) {
-      this.settings = settings;
-    }
-
-    buildComponent() {
-      const $head = this.createHeading();
-      const $settings = this.createSettings();
-      const $timelineRoot = this.createTimelineRoot();
-      const $groupRoot = this.createGroupRoot();
-
-      return $("<div class='cu-root' />")
-        .append($head)
-        .append($settings)
-        .append($timelineRoot)
-        .append($groupRoot);
-    }
-    createHeading() {
-      return $("<h2 class='text-xl text-medium text-dark-gray text-left mb-0' />")
-        .append("<span>Upcoming</span>")
-        .append("<span class='cu-btn-settings text-gray'><i class='icon-cog' /></span>")
-    }
-
-    createOption(option) {
-      return $("<option />")
-        .attr("value", option.value)
-        .text(option.text)
-        .prop("selected", option.selected);
-    }
-
-    createDropdown(opt) {
-      const options$ = opt.options.map(o => this.createOption(o));
-      const $select = $("<select class='cu-select' />")
-        .attr("id", opt.id)
-        .addClass(opt.className)
-        .append(options$)
-      const $1 = $("<div class='' />")
-        .append($select)
-      const $label = $("<label class='cu-label' />")
-        .text(opt.label)
-        .attr("for", opt.id);
-      const $description = $("<aside class='cu-aside' />")
-        .text(opt.description);
-      const $2 = $("<div class='' />")
-        .append($label)
-        .append($description);
-      return [$1, $2];
-    }
-    createSettings() {
-      const $maxGroups = this.createDropdown({options:[{text: "2", value: 2 },{text: "4", value: "4"},{text: "6", value: "6"},{text: "8", value: "8"}], id: "cu-max-groups", label: "Max No. of groups displayed" });
-      const $showTimeline = this.createDropdown({options:[{text: "Yes", value: true },{text: "No", value: false}], id: "cu-show-timeline", label: "Show Timeline" });
-      const $showPassedItems = this.createDropdown({options:[{text: "Yes", value: true },{text: "No", value: false}], id: "cu-show-passed-items", label: "Show Passed Items", description:"Includes items of this level that you already passed."});
-      const $indicatorStyle = this.createDropdown({options:[{text: "Circle", value: "circle" },{text: "Cone", value: "cone"}], id: "cu-select-indicator-style", label: "Timeline Indicator Style"});
-
-      const $form = $("<div class='cu-settings' />")
-        .append($showTimeline)
-        .append($showPassedItems)
-        .append($indicatorStyle)
-        .append($maxGroups)
-
-      return $("<fieldset class='cu-settings-root hidden' />")
-        .append($form);
-    }
-
-    createGroupRoot() {
-      return $("<div class='cu-group-root' />");
-    }
-
-    createTimelineRoot(domainModel) {
-      return $("<div class='cu-timeline-root relative' />");
-    }
-  }
-
-  class CuTimeService {
-    constructor() {
-      this.refresh();
-    }
-    refresh() {
-      this.now = new Date().getTime();
-    }
-    getTime(dateTime) {
-      return new Date(dateTime).getTime();
-    }
-    calcAvailableIn(availableAt) {
-      return availableAt - this.now;
-    }
-    msToHours(ms) {
-      return ms / 1000 / 60 / 60;
-    }
-    hoursToMs(h) {
-      return h * 1000 * 60 * 60;
-    }
-  }
-  class CuMountService {
-    constructor($root) {
-      this.$root = $root;
-    }
-    mount($mountPoint) {
-      this.$root.insertAfter($mountPoint);
-    }
-
-    unmount() {
-      this.$root.remove();
-    }
-  }
-  class CuController {
-    constructor(timeService, settings) {
-      this.timeService = timeService;
-      this.settings = settings;
-
-      this.intervalUpdate = this.intervalUpdate.bind(this);
-      this.resizeUpdate = this.resizeUpdate.bind(this);
-    }
-
-    update($root) {
-      this.uninit();
-      this.init($root);
-    }
-    init($root) {
-      this.setUpRefs($root);
-
-      this.uninit();
-      this.initInternal();
-      this.intervalId = setInterval(this.intervalUpdate, 1000 * 60); // 60s
-      window.removeEventListener("resize", this.resizeUpdate);
-    }
-
-    uninit() {
-      clearTimeout(this.timeoutId);
-      clearInterval(this.intervalId);
-      window.addEventListener("resize", this.resizeUpdate);
-    }
-
-    initInternal() {
-      this.intervalUpdate();
-      this.setOverflowIndicator();
-    }
-
-    resizeUpdate() {
-      this.removeOverflowIndicator();
-      this.setOverflowIndicator();
-    }
-
-    intervalUpdate() {
-      this.timeService.refresh();
-      this.updateGroupTimes();
-      this.updateTimelineIndicator();
-      this.resizeUpdate(); // updating group times might have resized the grid ...
-    }
-
-    removeOverflowIndicator() {
-      this.$groups.find(".cu-overflow-icon").remove();
-    }
-
-    createTimeLiteral(dcMinutesToGo) {
-      if (dcMinutesToGo <= 0) {
-        return 'available';
-      }
-      const minutesToGo = Math.ceil(dcMinutesToGo);
-      if (minutesToGo <= 60) {
-        const suffix = minutesToGo === 1 ? 'minute' : 'minutes';
-        return `in ${minutesToGo} ${suffix}`;
-      }
-      const hoursToGo = Math.ceil(minutesToGo / 60);
-      if (hoursToGo <= 48) {
-        return `in ${hoursToGo} hours`;
-      }
-      const daysToGo = Math.ceil(hoursToGo / 24);
-      return `in ${daysToGo} days`;
-    }
-
-    updateGroupTimes() {
-      this.$groupTimes.each((i, e) => {
-        const $groupTime = $(e);
-        const availableAt = $groupTime.data(availableAtMsKey);
-        const dcMinutesToGo = this.timeService.calcAvailableIn(availableAt) / 1000 / 60;
-        const text = this.createTimeLiteral(dcMinutesToGo);
-        $groupTime.text(text);
-      });
+      return $("<div class='scale' />").css({'left': `calc(${left}% - 1px)`}); // -1 to center
     }
 
     getIndicatorCss(relative, halfIndicatorWidth) {
@@ -559,209 +624,230 @@
       return {
         'left': `calc(${relative}% - ${halfIndicatorWidth}px)`
       }
-    }
+    };
 
     updateTimelineIndicator() {
-      const timescaleMs = this.timeService.hoursToMs(this.$timeline.data(timescaleHoursKey));
-      this.$timelineIndicators.each((i, e) => {
+      const timescale = store.state.timescale;
+      this.$element.find(".indicator").each((i, e) => {
         const $indicator = $(e);
         const availableAt = $indicator.data(availableAtMsKey);
-        const relative = this.timeService.calcAvailableIn(availableAt) / timescaleMs * 100;
+        const relative = (availableAt - store.state.timestamp) / timescale * 100;
         const halfIndicatorWidth = $indicator.outerWidth() / 2;
         $indicator.css(this.getIndicatorCss(relative, halfIndicatorWidth));
       });
     }
+  }
 
-    setOverflowIndicator() {
-      this.$groups.each((i, e) => {
-        const $group = $(e);
-        const $grid = $group.find(".cu-grid");
-        const $values = $group.find(".cu-value");
-        const bounds = {x: $grid.width(), y: $grid.height()};
-
-        const $visibles = $values.filter((i, v) => {
-          const position = $(v).position();
-          return position.left < bounds.x && position.top < bounds.y;
-        });
-        if ($visibles.length === $values.length) return;
-
-        const lastVisible = $visibles.last();
-        const numInvisible = $values.length - $visibles.length + 1; // +1 because the last visible element now gets obscured.
-
-        const $overflowIndicator = $("<div class='cu-overflow-icon' />")
-          .text(`+${numInvisible}`);
-
-        $(lastVisible).append($overflowIndicator);
-      });
+  class MainComponent extends Component {
+    constructor() {
+      super()
+    }
+    intervalUpdate() {
+      store.dispatch("updateUi");
     };
 
-    setUpRefs($root) {
-      this.$timeline = $root.find(".cu-timeline-root");
-      this.$timelineIndicators = this.$timeline.find(".cu-indicator");
-      this.$groups = $root.find(".cu-group");
-      this.$groupTimes = this.$groups.find(".cu-group-time");
+    resizeUpdate() {
+      store.events.publish("refresh-ui");
+    };
+
+    componentDidMount() {
+      window.addEventListener("resize", this.resizeUpdate);
+      this.intervalId = setInterval(this.intervalUpdate, 1000 * 60); // 60s
+      store.dispatch("updateUi");
+    }
+
+    componentDidDismount() {
+      window.removeEventListener("resize", this.resizeUpdate);
+      clearInterval(this.intervalId);
+    }
+
+    _render() {
+      $(this.attachShadow({mode: 'open'}))
+        .html(this.render());
+    }
+
+    render() {
+      const $head = this.createHeading();
+      const $styles = this.renderStyles();
+
+      return $("<div class='root' />")
+        .append($styles)
+        .append($head)
+        .append("<cu-settings class='hidden' />")
+        .append("<cu-timeline />")
+        .append("<cu-group-grid />");
+    }
+
+    createHeading() {
+      const $settingsBtn = $("<span class='btn-settings'><i class='icon-cog' /></span>")
+        .on("click", (e) => store.events.publish("settings-btn-clicked", e));
+      return $("<h2 />")
+        .append("<span>Upcoming</span>")
+        .append($settingsBtn)
+    }
+
+    renderStyles() {
+      return $("<style/>").text(
+        '.value { position: relative; font-size: 20px; height: 30px; line-height: 30px; text-align: center; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.2); color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,0.3); font-family: "Hiragino Kaku Gothic Pro", "Meiryo", "Source Han Sans Japanese", "NotoSansCJK", "TakaoPGothic", "Yu Gothic", "ヒラギノ角ゴ Pro W3", "メイリオ", "Osaka", "MS PGothic", "ＭＳ Ｐゴシック", "Noto Sans JP", sans-serif;}' +
+        '.radical-icon { background-color: #00a1f1; background-image: linear-gradient(to bottom, #0af, #0093dd); background-repeat: repeat-x; }' +
+        '.kanji-icon { background-color: #f100a1; background-image: linear-gradient(to bottom, #f0a, #dd0093); background-repeat: repeat-x; }' +
+        'cu-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, auto)); grid-gap: 15px 20px; }' +
+        '.grid { position: relative; display: grid; grid-column-gap: 4px; grid-template-columns: repeat(auto-fill, 30px); height: 30px; justify-content: space-between; overflow: hidden; }' +
+        '.root { font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif; }' +
+        'h2 { color: #555; font-weight: 400; font-size: 20.25px; margin-bottom: 5px; }' +
+        '.root:hover .btn-settings { opacity: 1; }' +
+        '.btn-settings { opacity:0; transition: opacity .3s ease-out; user-select: none; padding: 4px 12px; font-size: 16px; line-height: 20px; cursor: pointer; color: #888; font-family: FontAwesome; }' +
+        '.btn-settings::before { content: "\\f013"; }' +
+        '.btn-settings:hover { color: #333; }' +
+        '.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, auto)); grid-gap: 15px 20px; align-items: center; margin-bottom: 10px; }' +
+        '.setting {  display: grid; grid-template-columns: 80px auto; column-gap: 10px; align-items: center; }' +
+        '.select { margin-bottom: 0; width: 80px; }' +
+        '.aside { font-family: "Ubuntu", Helvetica, Arial, sans-serif; }' +
+        '.group-head { position: relative; display: flex; padding-top: 2px; background: linear-gradient(180deg, #fff 0%, transparent calc(100%)); margin-bottom: 5px; box-shadow: 0px 1px 0 0 rgba(0,0,0,0.2); }' +
+        '.group-number { width: 18px; text-align: center; color: #fff; font-size: 11.844px; font-weight: bold; line-height: 18px; vertical-align: baseline; text-shadow: 0 -1px 0 rgba(0,0,0,0.25); }' +
+        '.group-number[all-passed="true"] { background-color: #08C66C; }' +
+        '.group-number[all-passed="false"] { background-color: #7000a9; }' +
+        '.group-head .group-number { border-radius: 0; }' +
+        '.group-time { font-size: 11.844px; color: rgba(0,0,0,0.6); padding: 2px 3px 0; line-height: 14px; }' +
+        '.timeline { height: 16px; margin-bottom: 13px; position: relative; }' +
+        '.timeline:empty { display: none; }' +
+        '.time-axis { position: absolute; left: 0; right: 0; top: 0; height: 1px; border-top: 1px solid white; border-bottom: 1px solid white; box-shadow: inset 0px 2px 0 0 rgba(0,0,0,0.1); background-color: #d8d8d8; }' +
+        '.indicator { position: absolute; transition: left .5s ease-out; }' +
+        '[inactive="true"] { opacity: .3; }' +
+        '[cu-style="circle"] { margin-left: 8px; margin-right: 8px; }' +
+        '[cu-style="circle"] .time-axis { margin-left: -8px; margin-right: -8px; }' +
+        '[cu-style="circle"] .indicator { top: 2px; width: 16px; padding: 1px 0; font-size: 11.844px; line-height: 14px; border-radius: 8px; color: #fff; text-align: center; }' +
+        '[cu-style="circle"] .indicator[all-passed="true"] { background-color: #08C66C; }' +
+        '[cu-style="circle"] .indicator[all-passed="false"] { background-color: #7000a9; }' +
+        '[cu-style="circle"] .scale-end { width: 8px; }' +
+        '[cu-style="cone"] { margin-left: 5px; margin-right: 5px; }' +
+        '[cu-style="cone"] .time-axis { margin-left: -5px; margin-right: -5px; }' +
+        '[cu-style="cone"] .indicator { top: 3px; padding: 0; width: 0px;  height: 0px; color: transparent; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid; }' +
+        '[cu-style="cone"] .indicator[all-passed="true"] { border-bottom-color: #08C66C; }' +
+        '[cu-style="cone"] .indicator[all-passed="false"] { border-bottom-color: #7000a9; }' +
+        '[cu-style="cone"] .scale-end { width: 5px; }' +
+        '.tag { background-color: #fff; color: rgba(0,0,0,0.6); line-height: 14px; padding: 2px 4px; font-size: 11.844px; }' +
+        '.spacer { flex-grow: 1; }' +
+        '.scale { position: absolute; top: 2px; height: 6px; border-left: 1px solid #c8c8c8; border-right: 1px solid white; }' +
+        '.scale-end { position: absolute; left: 100%; top: 2px; height: 6px; width: 8px; background: linear-gradient(135deg, #d8d8d8 50%, transparent calc(50% + 1px)); }' +
+        '.scale-head { position: absolute; right: 0; bottom: 100%; font-size: 11.844px; line-height: 1em; color: #777; font-weight: 300; text-shadow: 0 1px 0 #fff;}' +
+        '.overflow-icon { position: absolute; top:0; left: 0; font-size: 12px; width: 100%; background: linear-gradient(to bottom, #5571e2, #294ddb); }' +
+        '.hidden { display: none; }'
+      );
     }
   }
 
-
-  class CuSettingsController {
-    constructor(bootstrap, settings) {
-      this.bootstrap = bootstrap;
-      this.settings = settings;
-
-      // caveman mode
+  class SettingsComponent extends Component {
+    constructor() {
+      super({
+        store
+      });
       this.toggleSettings = this.toggleSettings.bind(this);
-      this.updateTimeline = this.updateTimeline.bind(this);
-      this.updatePassed = this.updatePassed.bind(this);
-      this.updateIndicatorStyle = this.updateIndicatorStyle.bind(this);
-      this.updateMaxGroups = this.updateMaxGroups.bind(this);
     }
 
-    init($root) {
-      this.setUpRefs($root);
-      this.$btnSettings.on("click", this.toggleSettings);
-      this.$showTimeline.on("change", this.updateTimeline);
-      this.$showPassedItems.on("change", this.updatePassed);
-      this.$indicatorStyle.on("change", this.updateIndicatorStyle);
-      this.$maxGroups.on("change", this.updateMaxGroups);
+    componentDidMount() {
+      store.events.subscribe("settings-btn-clicked", this.toggleSettings)
     }
 
-    uninit($root) {
-      this.setUpRefs($root);
-      this.$btnSettings.off("click", this.toggleSettings);
-      this.$showTimeline.off("change", this.updateTimeline);
-      this.$showPassedItems.off("change", this.updatePassed);
-      this.$indicatorStyle.off("change", this.updateIndicatorStyle);
-      this.$maxGroups.off("change", this.updateMaxGroups);
+    componentDidDismount() {
+      store.events.unsubscribe("settings-btn-clicked", this.toggleSettings)
     }
 
-    toggleSettings() {
-      this.$settings.toggleClass("hidden");
-    }
-    updateIndicatorStyle(e) {
-      const value = e.target.value;
-      this.settings.setIndicatorStyle(value);
-      this.bootstrap.update(this.$root);
-    }
-    updateMaxGroups(e) {
-      const value = Number(e.target.value);
-      this.settings.setMaxGroups(value);
-      this.bootstrap.update(this.$root);
-    }
-    updateTimeline(e) {
-      const value = JSON.parse(e.target.value);
-      this.settings.setShowTimeline(value);
-      this.bootstrap.update(this.$root);
-    }
-    updatePassed(e) {
-      const value = JSON.parse(e.target.value);
-      this.settings.setShowPassed(value);
-      this.bootstrap.update(this.$root);
+    render() {
+      const $maxGroups = this.renderDropdown({
+        options: [
+          {text: "2", value: 2},
+          {text: "4", value: 4},
+          {text: "6", value: 6},
+          {text: "8", value: 8}],
+        id: "max-groups",
+        label: "Max No. of groups displayed",
+        selected: store.state.settings.maxGroups,
+        action: "setMaxGroups"
+      });
+      const $showTimeline = this.renderDropdown({
+        options: [
+          {text: "Yes", value: true},
+          {text: "No", value: false}],
+        id: "show-timeline",
+        label: "Show Timeline",
+        selected: store.state.settings.showTimeline,
+        action: "setShowTimeline"
+      });
+      const $showPassedItems = this.renderDropdown({
+        options: [
+          {text: "Yes", value: true},
+          {text: "No", value: false}],
+        id: "show-passed-items",
+        label: "Show Passed Items",
+        description: "Include items of this level that you already guru'ed.",
+        selected: store.state.settings.showPassedItems,
+        action: "setShowPassedItems"
+      });
+      const $indicatorStyle = this.renderDropdown({
+        options: [
+          {text: "Circle", value: "circle"},
+          {text: "Cone", value: "cone"}],
+        id: "select-indicator-style",
+        label: "Timeline Indicator Style",
+        selected: store.state.settings.indicatorStyle,
+        action: "setIndicatorStyle"
+      });
+
+      return $("<div class='settings' />")
+        .append($showTimeline)
+        .append($showPassedItems)
+        .append($indicatorStyle)
+        .append($maxGroups)
     }
 
-    setUpRefs($root) {
-      this.$root = $root;
-      this.$settings = $root.find(".cu-settings-root");
-      this.$btnSettings = $root.find(".cu-btn-settings");
-      this.$showTimeline = this.$settings.find("#cu-show-timeline");
-      this.$showPassedItems = this.$settings.find("#cu-show-passed-items");
-      this.$indicatorStyle = this.$settings.find("#cu-select-indicator-style");
-      this.$maxGroups = this.$settings.find("#cu-max-groups");
+    renderDropdown(opt) {
+      const options$ = opt.options.map(o => this.createOption(opt, o));
+      const $label = $("<label class='label' />")
+        .text(opt.label)
+        .attr("for", opt.id);
+      const $aside = $("<aside class='aside' />")
+        .text(opt.description);
+      const $description = $("<div />")
+        .append($label)
+        .append($aside);
+      const $select = $("<select class='select' />")
+        .attr("id", opt.id)
+        .addClass(opt.className)
+        .append(options$)
+        .on("change", (e) => store.dispatch(opt.action, JSON.parse(e.target.value)));
+      return $("<div class='setting' />")
+        .append($select)
+        .append($description);
+    }
+
+    createOption(options, option) {
+      return $("<option />")
+        .attr("value", JSON.stringify(option.value))
+        .text(option.text)
+        .prop("selected", options.selected === option.value);
+    }
+
+    toggleSettings(e) {
+      this.$element.toggleClass("hidden");
     }
   }
 
-  class CuSettings {
-    constructor() {
-      this.storagePrefix = "cu-";
-      this.maxGroupsKey = "maxGroups";
-      this.showTimelineKey = "showTimeline";
-      this.showPassedKey = "showPassed";
-      this.indicatorStyleKey = "indicatorStyle";
-    }
+// set up
+  customElements.define('cu-main', MainComponent);
+  customElements.define('cu-group-grid', GroupGridComponent);
+  customElements.define('cu-settings', SettingsComponent);
+  customElements.define('cu-timeline', TimelineComponent);
 
-    getShowTimeline() {
-      return JSON.parse(this._loadSetting(this.showTimelineKey, "true"));
-    }
+  $("[data-react-class='Progress/Progress'] > div > div")
+    .first()
+    .after("<cu-main />");
 
-    getShowPassed() {
-      return JSON.parse(this._loadSetting(this.showPassedKey, "true"));
-    }
+}
 
-    getMaxGroups() {
-      return Number(this._loadSetting(this.maxGroupsKey, 4));
-    }
-
-    getIndicatorStyle() {
-      return this._loadSetting(this.indicatorStyleKey, "circle");
-    }
-
-    setShowTimeline(flag) {
-      this._saveSetting(this.showTimelineKey, flag);
-    }
-
-    setShowPassed(flag) {
-      this._saveSetting(this.showPassedKey, flag);
-    }
-
-    setMaxGroups(num) {
-      this._saveSetting(this.maxGroupsKey, num);
-    }
-
-    setIndicatorStyle(name) {
-      this._saveSetting(this.indicatorStyleKey, name);
-    }
-
-    _saveSetting(key, value) {
-      const fqKey = this._getFullKey(key);
-      localStorage.setItem(fqKey, value);
-    }
-
-    _loadSetting(key, def) {
-      const fqKey = this._getFullKey(key);
-      const result = localStorage.getItem(fqKey);
-      return result === null ? def : result;
-    }
-
-    _getFullKey (key) {
-      return `${this.storagePrefix}${key}`;
-    }
-  }
-
-  class CuBootstrapper {
-    constructor() {
-      this.selector = ".progression";
-      this.settings = new CuSettings();
-      this.timeService = new CuTimeService();
-      this.dataProvider = new CuDataProvider(this.selector);
-      this.dataService = new CuDataService(this.timeService, this.dataProvider, this.settings);
-      this.scaffoldingService = new CuDomScaffoldingService(this.settings);
-      this.dynamicsService = new CuDomDynamicScaffoldingService(this.dataService, this.settings);
-      this.controller = new CuController(this.timeService, this.settings);
-      this.settingsController = new CuSettingsController(this, this.settings);
-    }
-
-    start() {
-      const $progression = $(this.selector);
-      if (!$progression.length) return;
-
-      const $mountPoint = $progression.find("div[title]").first();
-
-      const $root = this.scaffoldingService.buildComponent();
-      const mountService = new CuMountService($root);
-      mountService.mount($mountPoint);
-
-      this.settingsController.init($root);
-      this.dynamicsService.init($root);
-      this.controller.init($root);
-      return $root;
-    }
-
-    update($root) {
-      this.dynamicsService.update($root);
-      this.controller.update($root);
-    }
-  }
-
-  new CuBootstrapper().start();
-  // set up
-})(window.$);
+if (chrome && chrome.runtime && chrome.runtime.id) {
+  // Sandbox
+  RunInPage(bootstrap);
+} else {
+  bootstrap();
+}
