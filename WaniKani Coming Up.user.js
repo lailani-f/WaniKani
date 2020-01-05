@@ -5,6 +5,7 @@
 // @description  Shows upcoming progression reviews concisely
 // @author       lai
 // @match        *://www.wanikani.com/*
+// @match        *://preview.wanikani.com/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
@@ -17,6 +18,7 @@ function RunInPage(func) {
 }
 
 function bootstrap() {
+  const console = /preview\./.test(window.location.href) ? window.console : new Proxy({}, {get: () => () => {}});
 
 // Defined by WaniKani
   const unlockedAtKey = "unlockedAt";
@@ -87,7 +89,7 @@ function bootstrap() {
     }
 
     subscribe(event, callback) {
-      let self = this;
+      const self = this;
 
       if (!self.events.hasOwnProperty(event)) {
         self.events[event] = [];
@@ -97,7 +99,7 @@ function bootstrap() {
     }
 
     unsubscribe(event, callback) {
-      let self = this;
+      const self = this;
 
       if (!self.events.hasOwnProperty(event)) {
         return false;
@@ -108,7 +110,7 @@ function bootstrap() {
     }
 
     publish(event, data = {}) {
-      let self = this;
+      const self = this;
 
       if (!self.events.hasOwnProperty(event)) {
         return [];
@@ -120,7 +122,7 @@ function bootstrap() {
 
   class Store {
     constructor(params) {
-      let self = this;
+      const self = this;
       self.actions = params.actions || {};
       self.mutations = params.mutations || {};
       self.state = {};
@@ -157,7 +159,7 @@ function bootstrap() {
 
     dispatch(actionKey, payload) {
 
-      let self = this;
+      const self = this;
 
       if (typeof self.actions[actionKey] !== 'function') {
         console.warn(`Action "${actionKey}" doesn't exist.`);
@@ -176,7 +178,7 @@ function bootstrap() {
     }
 
     commit(mutationKey, payload) {
-      let self = this;
+      const self = this;
 
       if (typeof self.mutations[mutationKey] !== 'function') {
         console.warn(`Mutation "${mutationKey}" doesn't exist`);
@@ -185,7 +187,7 @@ function bootstrap() {
 
       self.status = 'mutation';
 
-      let newState = self.mutations[mutationKey](self.state, payload);
+      const newState = self.mutations[mutationKey](self.state, payload);
 
       self.state = Object.assign(self.state, newState);
 
@@ -701,7 +703,7 @@ function bootstrap() {
         '.btn-settings:hover { color: #333; }' +
         '.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, auto)); grid-gap: 15px 20px; align-items: center; margin-bottom: 10px; }' +
         '.setting {  display: grid; grid-template-columns: 80px auto; column-gap: 10px; align-items: center; }' +
-        '.select { margin-bottom: 0; width: 80px; }' +
+        '.select { width: 80px; border: 2px solid; padding: 4px 6px; border-radius: 4px; }' +
         '.aside { font-family: "Ubuntu", Helvetica, Arial, sans-serif; }' +
         '.group-head { position: relative; display: flex; padding-top: 2px; background: linear-gradient(180deg, #fff 0%, transparent calc(100%)); margin-bottom: 5px; box-shadow: 0px 1px 0 0 rgba(0,0,0,0.2); }' +
         '.group-number { width: 18px; text-align: center; color: #fff; font-size: 11.844px; font-weight: bold; line-height: 18px; vertical-align: baseline; text-shadow: 0 -1px 0 rgba(0,0,0,0.25); }' +
