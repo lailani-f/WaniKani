@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Coming Up
 // @namespace    wk_lai
-// @version      1.0
+// @version      1.6
 // @description  Shows upcoming progression reviews concisely
 // @author       lai
 // @match        *://www.wanikani.com/*
@@ -233,7 +233,7 @@ function bootstrap() {
   const cuSettings = {
     load() {
       const storedSettings = JSON.parse(localStorage.getItem("cu-settings"));
-      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: "never", indicatorStyle: "cone"};
+      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: false, indicatorStyle: "cone"};
       return Object.assign(defaultSettings, storedSettings);
     },
     save(settings) {
@@ -290,6 +290,9 @@ function bootstrap() {
       const notYetPassedItems = filterPassedItems(unlockedItems);
       const groupedData = Array.from(groupBy(notYetPassedItems, availableAtKey));
       const filteredData = groupedData.filter(x => x[0] != null).filter(x => x[1].length);
+      if (!filteredData.length){
+        return context.commit("setDomainModel", []);
+      }
       const domainModel = filteredData.map(d => createDomainModel(d));
       const sorted = tagGroupsAndSort(domainModel);
       context.commit("setDomainModel", sorted);
@@ -462,7 +465,7 @@ function bootstrap() {
 
     renderGridItemContent(value) {
       if (value.characterImage) {
-        return $("<img  src=''/>")
+        return $("<img src='' class='character-image'/>")
           .attr("src", value.characterImage);
       } else {
         return $(document.createTextNode(value.characters));
@@ -479,7 +482,7 @@ function bootstrap() {
     };
 
     renderGroupNumber(group, index) {
-      return $("<div class='group-number badge' />")
+      return $("<div class='group-number' />")
         .attr("all-passed", group[allPassedKey])
         .text(index + 1);
     }
@@ -581,7 +584,7 @@ function bootstrap() {
       if (!store.state.timescale) return null;
 
       const time = getFriendlyTime(store.state.timescale);
-      const $timeAxis = $("<div class='time-axis boxshadow-inset bg-mid-gray' />");
+      const $timeAxis = $("<div class='time-axis' />");
       const $scaleEnd = $("<div class='scale-end' />");
       const $head = $("<div class='scale-head' />")
         .text(`${time.value} ${time.unit}`);
@@ -672,6 +675,10 @@ function bootstrap() {
       const $head = this.createHeading();
       const $styles = this.renderStyles();
 
+      if (!store.state.domainModel.length){
+        return null;
+      }
+
       return $("<div class='root' />")
         .append($styles)
         .append($head)
@@ -711,6 +718,7 @@ function bootstrap() {
         '.group-number[all-passed="false"] { background-color: #7000a9; }' +
         '.group-head .group-number { border-radius: 0; }' +
         '.group-time { font-size: 11.844px; color: rgba(0,0,0,0.6); padding: 2px 3px 0; line-height: 14px; }' +
+        '.character-image { height: 1em; vertical-align: middle; }' +
         '.timeline { height: 16px; margin-bottom: 13px; position: relative; }' +
         '.timeline:empty { display: none; }' +
         '.time-axis { position: absolute; left: 0; right: 0; top: 0; height: 1px; border-top: 1px solid white; border-bottom: 1px solid white; box-shadow: inset 0px 2px 0 0 rgba(0,0,0,0.1); background-color: #d8d8d8; }' +
@@ -761,7 +769,9 @@ function bootstrap() {
           {text: "2", value: 2},
           {text: "4", value: 4},
           {text: "6", value: 6},
-          {text: "8", value: 8}],
+          {text: "8", value: 8},
+          {text: "10", value: 10},
+          {text: "99", value: 99}],
         id: "max-groups",
         label: "Max No. of groups displayed",
         selected: store.state.settings.maxGroups,
