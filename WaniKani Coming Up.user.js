@@ -857,7 +857,7 @@ function bootstrap() {
 
 }
 
-if (chrome && chrome.runtime && chrome.runtime.id) {
+if (window.chrome && window.chrome.runtime && window.chrome.runtime.id) {
   // Sandbox
   RunInPage(bootstrap);
 } else {
