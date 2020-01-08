@@ -65,23 +65,40 @@ function bootstrap() {
   };
   const orderBy = (arr, predicate) => arr.slice().sort(predicate);
 
-  const getTime = (dateTime) => new Date(dateTime).getTime();
-  const hoursToMs = (h) => h * 1000 * 60 * 60;
-  const getFriendlyTime = (ms) => {
-    const minutes = Math.ceil(ms / 1000 / 60);
-    if (minutes <= 0) {
-      return { value: 'now' };
+  const Time = {
+    getTime: (dateTime) => new Date(dateTime).getTime(),
+    hoursToMs: (h) => h * 1000 * 60 * 60,
+    getFriendlyTime: (ms) => {
+      const minutes = Math.ceil(ms / 1000 / 60);
+      if (minutes <= 0) {
+        return {value: 'now'};
+      }
+      if (minutes <= 60) {
+        return {unit: 'minutes', value: minutes};
+      }
+      const hours = Math.ceil(minutes / 60);
+      if (hours <= 48) {
+        return {unit: 'hours', value: hours};
+      }
+      const days = Math.ceil(hours / 24);
+      return {unit: 'days', value: days};
+    },
+    getFriendlyTimeLiteral(ms) {
+      const time = Time.getFriendlyTime(ms);
+      switch (time.unit) {
+        case 'minutes':
+          const suffix = time.value === 1 ? 'minute' : 'minutes';
+          return `${time.value} ${suffix}`;
+        case 'hours':
+          return `${time.value} hours`;
+        case 'days':
+          return `${time.value} days`;
+        default:
+          return time.value;
+      }
     }
-    if (minutes <= 60) {
-      return { unit: 'minutes', value: minutes };
-    }
-    const hours = Math.ceil(minutes / 60);
-    if (hours <= 48) {
-      return { unit: 'hours', value: hours };
-    }
-    const days = Math.ceil(hours / 24);
-    return { unit: 'days', value: days };
   };
+
 
   class PubSub {
     constructor() {
@@ -233,7 +250,7 @@ function bootstrap() {
   const cuSettings = {
     load() {
       const storedSettings = JSON.parse(localStorage.getItem("cu-settings"));
-      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: false, indicatorStyle: "cone"};
+      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: false, indicatorStyle: "cone", staticTimescale: null};
       return Object.assign(defaultSettings, storedSettings);
     },
     save(settings) {
@@ -247,6 +264,11 @@ function bootstrap() {
       context.commit("setMaxGroups", payload);
       context.dispatch("storeSettings");
       context.dispatch("refreshDomainModel");
+      context.dispatch("updateUi");
+    },
+    setStaticTimescale(context, payload) {
+      context.commit("setStaticTimescale", payload);
+      context.dispatch("storeSettings");
       context.dispatch("updateUi");
     },
     setShowTimeline(context, payload) {
@@ -279,10 +301,24 @@ function bootstrap() {
       context.events.publish("refresh-ui");
     },
     refreshTimescale(context) {
-      // smallest fitting scale
-      const relevantGroups = context.state.domainModel.slice(0, context.state.settings.maxGroups);
-      const availableIn = relevantGroups.map(v => v[availableAtMsKey] - context.state.timestamp);
-      const timescale = availableIn.reduce((prev, cur) => context.state.timescaleSet.find(x => x > cur) || prev, 0);
+      function fitToGroups(groups) {
+        const availableIn = groups.map(v => v[availableAtMsKey] - context.state.timestamp);
+        return availableIn.reduce((prev, cur) => context.state.timescaleSet.find(x => x > cur) || prev, 0);
+      }
+      function calculateTimescale() {
+        switch (context.state.settings.showTimeline) {
+          case "hidden":
+            return null;
+          case "fitGroups":
+            const relevantGroups = context.state.domainModel.slice(0, context.state.settings.maxGroups);
+            return fitToGroups(relevantGroups);
+          case "fitAll":
+            return fitToGroups(context.state.domainModel);
+          case "static":
+            return context.state.settings.staticTimescale;
+        }
+      }
+      const timescale = calculateTimescale();
       context.commit("setTimescale", timescale);
     },
     refreshDomainModel(context) {
@@ -325,7 +361,7 @@ function bootstrap() {
       function createDomainModel(x) {
         const values = x[1];
         const allPassed = values.every(x => x[passedKey]);
-        const availableAt = getTime(x[0]);
+        const availableAt = Time.getTime(x[0]);
         const srsScore = findLowestSrsScore(availableAt, values);
 
         return {
@@ -360,6 +396,9 @@ function bootstrap() {
     setShowTimeline(state, payload) {
       state.settings.showTimeline = payload;
     },
+    setStaticTimescale(state, payload) {
+      state.settings.staticTimescale = payload;
+    },
     setShowPassedItems(state, payload) {
       state.settings.showPassedItems = payload;
     },
@@ -384,7 +423,7 @@ function bootstrap() {
     state: {
       levelData,
       settings: cuSettings.load(),
-      timescaleSet: timescaleSetHours.map(hoursToMs)
+      timescaleSet: timescaleSetHours.map(Time.hoursToMs)
     }
   });
   store.dispatch("refreshDomainModel");
@@ -509,28 +548,13 @@ function bootstrap() {
       }
     };
 
-    createTimeLiteral(ms) {
-      const time = getFriendlyTime(ms);
-      switch (time.unit) {
-        case 'minutes':
-          const suffix = time.value === 1 ? 'minute' : 'minutes';
-          return `in ${time.value} ${suffix}`;
-        case 'hours':
-          return `in ${time.value} hours`;
-        case 'days':
-          return `in ${time.value} days`;
-        default:
-          return time.value;
-      }
-    }
-
     updateGroupTimes() {
       this.$element.find(".group-time").each((i, e) => {
         const $groupTime = $(e);
         const availableAt = $groupTime.data(availableAtMsKey);
         const availableIn = (availableAt - store.state.timestamp);
-        const text = this.createTimeLiteral(availableIn);
-        $groupTime.text(text);
+        const text = Time.getFriendlyTimeLiteral(availableIn);
+        $groupTime.text(`in ${text}`);
       });
     }
 
@@ -583,7 +607,7 @@ function bootstrap() {
       if (!store.state.settings.showTimeline) return null;
       if (!store.state.timescale) return null;
 
-      const time = getFriendlyTime(store.state.timescale);
+      const time = Time.getFriendlyTime(store.state.timescale);
       const $timeAxis = $("<div class='time-axis' />");
       const $scaleEnd = $("<div class='scale-end' />");
       const $head = $("<div class='scale-head' />")
@@ -709,8 +733,8 @@ function bootstrap() {
         '.btn-settings::before { content: "\\f013"; }' +
         '.btn-settings:hover { color: #333; }' +
         '.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, auto)); grid-gap: 15px 20px; align-items: center; margin-bottom: 10px; }' +
-        '.setting {  display: grid; grid-template-columns: 80px auto; column-gap: 10px; align-items: center; }' +
-        '.select { width: 80px; border: 2px solid; padding: 4px 6px; border-radius: 4px; }' +
+        '.setting {  display: grid; grid-template-columns: 120px auto; column-gap: 10px; align-items: center; }' +
+        '.select { width: 120px; border: 2px solid; padding: 4px 6px; border-radius: 4px; }' +
         '.aside { font-family: "Ubuntu", Helvetica, Arial, sans-serif; }' +
         '.group-head { position: relative; display: flex; padding-top: 2px; background: linear-gradient(180deg, #fff 0%, transparent calc(100%)); margin-bottom: 5px; box-shadow: 0px 1px 0 0 rgba(0,0,0,0.2); }' +
         '.group-number { width: 18px; text-align: center; color: #fff; font-size: 11.844px; font-weight: bold; line-height: 18px; vertical-align: baseline; text-shadow: 0 -1px 0 rgba(0,0,0,0.25); }' +
@@ -779,13 +803,16 @@ function bootstrap() {
       });
       const $showTimeline = this.renderDropdown({
         options: [
-          {text: "Yes", value: true},
-          {text: "No", value: false}],
+          {text: "Hidden", value: "hidden"},
+          {text: "Fit Groups", value: "fitGroups"},
+          {text: "Fit All", value: "fitAll"},
+          {text: "Static", value: "static"}],
         id: "show-timeline",
-        label: "Show Timeline",
+        label: "Timeline Style",
         selected: store.state.settings.showTimeline,
         action: "setShowTimeline"
       });
+      const $staticTimescale = this.renderStaticTimescaleDropdown();
       const $showPassedItems = this.renderDropdown({
         options: [
           {text: "Yes", value: true},
@@ -808,11 +835,28 @@ function bootstrap() {
 
       return $("<div class='settings' />")
         .append($showTimeline)
+        .append($staticTimescale)
         .append($showPassedItems)
         .append($indicatorStyle)
         .append($maxGroups)
     }
-
+    renderStaticTimescaleDropdown() {
+      return this.renderDropdown({
+        options: timescaleSetHours.map(this.createTimescaleOption),
+        id: "static-timescale",
+        label: "Static Timescale",
+        selected: store.state.settings.staticTimescale,
+        action: "setStaticTimescale",
+        disabled: (store.state.settings.showTimeline !== "static")
+      });
+    }
+    createTimescaleOption(h) {
+      const ms = Time.hoursToMs(h);
+      return {
+        text: Time.getFriendlyTimeLiteral(ms),
+        value: ms
+      };
+    }
     renderDropdown(opt) {
       const options$ = opt.options.map(o => this.createOption(opt, o));
       const $label = $("<label class='label' />")
@@ -825,6 +869,7 @@ function bootstrap() {
         .append($aside);
       const $select = $("<select class='select' />")
         .attr("id", opt.id)
+        .prop("disabled", opt.disabled)
         .addClass(opt.className)
         .append(options$)
         .on("change", (e) => store.dispatch(opt.action, JSON.parse(e.target.value)));
