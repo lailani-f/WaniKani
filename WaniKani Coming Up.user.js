@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Coming Up
 // @namespace    wk_lai
-// @version      1.6
+// @version      1.10
 // @description  Shows upcoming progression reviews concisely
 // @author       lai
 // @match        *://www.wanikani.com/*
