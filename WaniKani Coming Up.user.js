@@ -30,7 +30,7 @@ function bootstrap() {
   const valuesKey = "values";
   const availableAtMsKey = "availableAtMs";
   const amountKey = "amount";
-  const srsScoreKey = "srsScore";
+  const srsKey = "srs";
   const tagsKey = "tags";
   const passedKey = "passed";
   const allPassedKey = "allPassed";
@@ -288,6 +288,10 @@ function bootstrap() {
       context.dispatch("refreshDomainModel");
       context.dispatch("updateUi");
     },
+    showOverflow(context, payload) {
+      context.commit("setShowOverflow", payload);
+      context.dispatch("updateUi");
+    },
     storeSettings(context) {
       cuSettings.save(context.state.settings);
     },
@@ -340,14 +344,20 @@ function bootstrap() {
         return items.filter(i => !i[passedAtKey]);
       }
 
-      function findLowestSrsScore(availableAt, values) {
-        const srsScores = values.map(v => srsScoresByStage[v[srsStageKey]] - availableAt);
-        const lowOrdered = orderBy(srsScores, (a, b) => a - b);
-        return first(lowOrdered);
+      function calculateSrsData(availableAt, values) {
+        const srs = values.map(v => {
+          const stage = v[srsStageKey];
+          const score = srsScoresByStage[stage] - availableAt;
+          return { stage, score };
+        });
+        const lowOrdered = orderBy(srs, (a, b) => a.score - b.score);
+        const lowestSrs = first(lowOrdered);
+        const isStageHomogeneous = srs.every(s => s.stage === lowestSrs.stage);
+        return { ...lowestSrs, isStageHomogeneous };
       }
 
       function sortByLowestLevel(groups) {
-        return orderBy(groups, (a, b) => a[srsScoreKey] - b[srsScoreKey]);
+        return orderBy(groups, (a, b) => a[srsKey].score - b[srsKey].score);
       }
 
       function sortByLargestAmount(groups) {
@@ -362,13 +372,13 @@ function bootstrap() {
         const values = x[1];
         const allPassed = values.every(x => x[passedKey]);
         const availableAt = Time.getTime(x[0]);
-        const srsScore = findLowestSrsScore(availableAt, values);
+        const srsData = calculateSrsData(availableAt, values);
 
         return {
           [valuesKey]: values,
           [availableAtMsKey]: availableAt,
           [amountKey]: values.length,
-          [srsScoreKey]: srsScore,
+          [srsKey]: srsData,
           [allPassedKey]: allPassed,
           [tagsKey]: []
         };
@@ -414,6 +424,9 @@ function bootstrap() {
     setTimescale(state, payload) {
       state.timescale = payload;
     },
+    setShowOverflow(state, {index, flag}) {
+      state.showOverflow[index] = flag;
+    },
   };
 
   const levelData = $("[data-react-class='Progress/Progress']").data("react-props").data;
@@ -423,7 +436,8 @@ function bootstrap() {
     state: {
       levelData,
       settings: cuSettings.load(),
-      timescaleSet: timescaleSetHours.map(Time.hoursToMs)
+      timescaleSet: timescaleSetHours.map(Time.hoursToMs),
+      showOverflow: {}
     }
   });
   store.dispatch("refreshDomainModel");
@@ -463,38 +477,64 @@ function bootstrap() {
 
     renderGroup(group, index) {
       const $head = this.renderGroupHead(group, index);
-      const $body = this.renderBody(group);
+      const $body = this.renderBody(group, index);
 
       return $("<div class='group' />")
         .append($head)
         .append($body);
     };
 
-    renderBody(group) {
-      const gridValues = group[valuesKey].map(v => this.renderGridValue(v));
+    getShowOverflowData(index){
+      if (store.state.showOverflow[index]) {
+        const $collapseButton = $("<div class='value btn icon overflow-icon icon-close' />");
+        $collapseButton.on('click', () => store.dispatch("showOverflow", {index, flag: false}));
+        return {
+          className: "show-overflow",
+          $element: $collapseButton
+        };
+      }
+      return { className: null, $element: null };
+    }
 
+    renderBody(group, index) {
+      const gridValues = group[valuesKey].map(v => this.renderGridValue(v));
+      const { className, $element } = this.getShowOverflowData(index);
+console.log(className, $element);
       return $("<div class='grid' />")
-        .append(gridValues);
+        .addClass(className)
+        .append(gridValues)
+        .append($element);
     };
 
-    renderTag(name, title) {
+    renderTag(tagContent, title) {
       return $("<div class='tag' />")
-        .text(name)
+        .append(tagContent)
         .attr("title", title);
     }
 
+    renderSrsStageTag(group) {
+      const text = ["Stage"];
+      const title = ["The SRS stage of this group."];
+      const srsData = group[srsKey];
+      text.push(srsData.stage);
+      if (!srsData.isStageHomogeneous) {
+        text.push("+");
+        title.push("A '+' indicates at least one item of a higher stage.")
+      }
+      title.push("Upon reaching stage 5 items are guru'ed and therefore passed.");
+      return this.renderTag(document.createTextNode(text.join(' ')), title.join(' '));
+    }
+    renderCriticalTag(group) {
+      if (!group.isLowest) {
+        return;
+      }
+      const content = $("<i class='icon icon-bolt' />");
+      return this.renderTag(content, "This group contains items with the lowest SRS Score. The SRS Score is calculated by SRS Stage and time until the review is available.");
+    }
     renderTags(group) {
-      const tags = [];
-      if (group.isEarliest) {
-        tags.push(this.renderTag("earliest", "This group will be the earliest available for review."));
-      }
-      if (group.isLargest) {
-        tags.push(this.renderTag("largest", "This group contains the largest amount of review material."));
-      }
-      if (group.isLowest) {
-        tags.push(this.renderTag("critical", "In this group are one or more items of the lowest SRS stage."));
-      }
-      return tags;
+      const srsStageTag = this.renderSrsStageTag(group);
+      const criticalTag = this.renderCriticalTag(group);
+      return [srsStageTag, criticalTag];
     };
 
     renderTimeToGo(group) {
@@ -559,9 +599,11 @@ function bootstrap() {
     }
 
     resizeUpdate() {
-      this.$element.find(".overflow-icon").remove();
       this.$element.find(".group").each((i, e) => {
+        if (store.state.showOverflow[i]) return;
+
         const $group = $(e);
+        $group.find(".overflow-icon").remove();
         const $grid = $group.find(".grid");
         const $values = $group.find(".value");
         const bounds = {x: $grid.width(), y: $grid.height()};
@@ -574,12 +616,16 @@ function bootstrap() {
         const lastVisible = $visibles.last();
         const numInvisible = $values.length - $visibles.length + 1; // +1 because the last visible element now gets obscured.
 
-        const $overflowIndicator = $("<div class='overflow-icon' />")
-          .text(`+${numInvisible}`);
+        const $overflowIndicator = this.renderOverflowIndicator(i, numInvisible);
 
         $(lastVisible).append($overflowIndicator);
       });
     };
+    renderOverflowIndicator(index, numInvisible){
+      return $("<div class='btn overflow-icon' />")
+        .text(`+${numInvisible}`)
+        .on("click", () => store.dispatch("showOverflow", {index, flag: true}))
+    }
   }
 
   class TimelineComponent extends Component {
@@ -679,6 +725,10 @@ function bootstrap() {
       store.events.publish("refresh-ui");
     };
 
+    getShadowRoot() {
+      return this.shadowRoot || this.attachShadow({mode: 'open'});
+    }
+
     componentDidMount() {
       window.addEventListener("resize", this.resizeUpdate);
       this.intervalId = setInterval(this.intervalUpdate, 1000 * 60); // 60s
@@ -691,7 +741,7 @@ function bootstrap() {
     }
 
     _render() {
-      $(this.attachShadow({mode: 'open'}))
+      $(this.getShadowRoot())
         .html(this.render());
     }
 
@@ -712,7 +762,7 @@ function bootstrap() {
     }
 
     createHeading() {
-      const $settingsBtn = $("<span class='btn-settings'><i class='icon-cog' /></span>")
+      const $settingsBtn = $("<span class='btn btn-settings'><i class='icon icon-cog' /></span>")
         .on("click", (e) => store.events.publish("settings-btn-clicked", e));
       return $("<h2 />")
         .append("<span>Upcoming</span>")
@@ -725,12 +775,16 @@ function bootstrap() {
         '.radical-icon { background-color: #00a1f1; background-image: linear-gradient(to bottom, #0af, #0093dd); background-repeat: repeat-x; }' +
         '.kanji-icon { background-color: #f100a1; background-image: linear-gradient(to bottom, #f0a, #dd0093); background-repeat: repeat-x; }' +
         'cu-group-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, auto)); grid-gap: 15px 20px; }' +
-        '.grid { position: relative; display: grid; grid-column-gap: 4px; grid-template-columns: repeat(auto-fill, 30px); height: 30px; justify-content: space-between; overflow: hidden; }' +
+        '.grid { position: relative; display: grid; grid-gap: 4px 4px; grid-template-columns: repeat(auto-fill, 30px); height: 30px; justify-content: space-between; overflow: hidden; }' +
         '.root { font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif; }' +
         'h2 { color: #555; font-weight: 400; font-size: 20.25px; margin-bottom: 5px; }' +
         '.root:hover .btn-settings { opacity: 1; }' +
-        '.btn-settings { opacity:0; transition: opacity .3s ease-out; user-select: none; padding: 4px 12px; font-size: 16px; line-height: 20px; cursor: pointer; color: #888; font-family: FontAwesome; }' +
-        '.btn-settings::before { content: "\\f013"; }' +
+        '.btn { user-select: none; cursor: pointer; }' +
+        '.btn-settings { opacity:0; transition: opacity .3s ease-out; padding: 4px 12px; font-size: 16px; line-height: 20px; color: #888; }' +
+        '.icon { font-family: FontAwesome; font-style: normal; }' +
+        '.icon-bolt::before { content: "\\f0e7" }' +
+        '.icon-cog::before { content: "\\f013"; }' +
+        '.icon-close::before { content: "\\f00d"; }' +
         '.btn-settings:hover { color: #333; }' +
         '.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, auto)); grid-gap: 15px 20px; align-items: center; margin-bottom: 10px; }' +
         '.setting {  display: grid; grid-template-columns: 120px auto; column-gap: 10px; align-items: center; }' +
@@ -765,7 +819,9 @@ function bootstrap() {
         '.scale { position: absolute; top: 2px; height: 6px; border-left: 1px solid #c8c8c8; border-right: 1px solid white; }' +
         '.scale-end { position: absolute; left: 100%; top: 2px; height: 6px; width: 8px; background: linear-gradient(135deg, #d8d8d8 50%, transparent calc(50% + 1px)); }' +
         '.scale-head { position: absolute; right: 0; bottom: 100%; font-size: 11.844px; line-height: 1em; color: #777; font-weight: 300; text-shadow: 0 1px 0 #fff;}' +
-        '.overflow-icon { position: absolute; top:0; left: 0; font-size: 12px; width: 100%; background: linear-gradient(to bottom, #5571e2, #294ddb); }' +
+        '.overflow-icon { font-size: 12px; width: 100%; background: linear-gradient(to bottom, #5571e2, #294ddb); }' +
+        '.value .overflow-icon { position: absolute; top:0; left: 0; }' +
+        '.show-overflow { height: auto; }'+
         '.hidden { display: none; }'
       );
     }
