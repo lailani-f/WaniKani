@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Coming Up
 // @namespace    wk_lai
-// @version      1.10
+// @version      1.11
 // @description  Shows upcoming progression reviews concisely
 // @author       lai
 // @match        *://www.wanikani.com/*
@@ -250,7 +250,7 @@ function bootstrap() {
   const cuSettings = {
     load() {
       const storedSettings = JSON.parse(localStorage.getItem("cu-settings"));
-      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: false, indicatorStyle: "cone", staticTimescale: null};
+      const defaultSettings = {maxGroups: 4, showTimeline: true, showPassedItems: false, indicatorStyle: "cone", staticTimescaleMs: Time.hoursToMs(48)};
       return Object.assign(defaultSettings, storedSettings);
     },
     save(settings) {
@@ -319,7 +319,7 @@ function bootstrap() {
           case "fitAll":
             return fitToGroups(context.state.domainModel);
           case "static":
-            return context.state.settings.staticTimescale;
+            return context.state.settings.staticTimescaleMs;
         }
       }
       const timescale = calculateTimescale();
@@ -407,7 +407,7 @@ function bootstrap() {
       state.settings.showTimeline = payload;
     },
     setStaticTimescale(state, payload) {
-      state.settings.staticTimescale = payload;
+      state.settings.staticTimescaleMs = payload;
     },
     setShowPassedItems(state, payload) {
       state.settings.showPassedItems = payload;
@@ -521,7 +521,11 @@ console.log(className, $element);
         text.push("+");
         title.push("A '+' indicates at least one item of a higher stage.")
       }
-      title.push("Upon reaching stage 5 items are guru'ed and therefore passed.");
+      if (group[allPassedKey]) {
+        title.push("You have passed all items in this group.");
+      } else {
+        title.push("Upon reaching stage 5 items are guru'ed and therefore passed.");
+      }
       return this.renderTag(document.createTextNode(text.join(' ')), title.join(' '));
     }
     renderCriticalTag(group) {
@@ -593,8 +597,8 @@ console.log(className, $element);
         const $groupTime = $(e);
         const availableAt = $groupTime.data(availableAtMsKey);
         const availableIn = (availableAt - store.state.timestamp);
-        const text = Time.getFriendlyTimeLiteral(availableIn);
-        $groupTime.text(`in ${text}`);
+        const text = this.getGroupTimeText(availableIn);
+        $groupTime.text(text);
       });
     }
 
@@ -625,6 +629,15 @@ console.log(className, $element);
       return $("<div class='btn overflow-icon' />")
         .text(`+${numInvisible}`)
         .on("click", () => store.dispatch("showOverflow", {index, flag: true}))
+    }
+
+    getGroupTimeText(availableIn) {
+      if (availableIn <= 0) {
+        return "available now";
+      } else {
+        const text = Time.getFriendlyTimeLiteral(availableIn);
+        return `in ${text}`;
+      }
     }
   }
 
@@ -901,7 +914,7 @@ console.log(className, $element);
         options: timescaleSetHours.map(this.createTimescaleOption),
         id: "static-timescale",
         label: "Static Timescale",
-        selected: store.state.settings.staticTimescale,
+        selected: store.state.settings.staticTimescaleMs,
         action: "setStaticTimescale",
         disabled: (store.state.settings.showTimeline !== "static")
       });
